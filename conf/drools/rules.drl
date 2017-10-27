@@ -1,0 +1,7 @@
+
+dialect  "mvel"
+
+rule "rules"
+    when
+    then
+end
