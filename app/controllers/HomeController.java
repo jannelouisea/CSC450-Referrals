@@ -56,7 +56,7 @@ public class HomeController extends Controller {
         referrals = ActorSystem.create("referrals");
 
         workerNetwork = WorkerNetwork.getInstance();
-        printInfoTimeout = new Timeout(Duration.create(1, "seconds"));
+        printInfoTimeout = new Timeout(Duration.create(2, "seconds"));
         gen25QueriesTimeout = new Timeout(Duration.create(30, "seconds"));
     }
 
@@ -92,7 +92,6 @@ public class HomeController extends Controller {
         }
 
         processJsonGraph(json);
-        workerNetwork.orderWorkers();       // TODO Fix this!!
         ArrayList<ActorRef> network = workerNetwork.getNetwork();
         for(ActorRef w: network) {
             w.tell(new SetWorkerNetwork(), null);
@@ -133,7 +132,7 @@ public class HomeController extends Controller {
 
         for(WorkerBean worker: workers) {
             ActorRef workerRef = referrals.actorOf(WorkerActor.getProps(worker), worker.name);
-            workerNetwork.addWorker(workerRef);
+            workerNetwork.addWorker(worker.name, workerRef);
         }
 
     }
@@ -156,8 +155,49 @@ public class HomeController extends Controller {
     public Result processQueryForWorker(String workerName, String query) {
         return ok("processQuery: " + workerName + " " + query + "\n");
     }
-    public Result getStatesForWorker(String workerName) {
-        return ok("getStates: " + workerName + "\n");
+    public Result getStatesForWorker(String name) {
+        ObjectNode response = Json.newObject();
+        ActorRef workerRef = workerNetwork.getWorkerFromName(name);
+
+        if (workerRef == null) {
+            response.put("status", ERROR_STATUS);
+            response.put("message", "Actor " + name + " does not exist.");
+        } else {
+            Future<Object> dumpStatesFuture = ask(workerRef, new DumpStates(), printInfoTimeout);
+            try {
+                WorkerStates result = (WorkerStates) Await.result(dumpStatesFuture, gen25QueriesTimeout.duration());
+                response.put("status", SUCCESS_STATUS);
+
+                // print out neighbors
+                ArrayList<ObjectNode> neighbors = new ArrayList<>();
+                for (KnownWorker kw: result.neighbors) {
+                    ObjectNode n = Json.newObject();
+                    n.put("name", kw.name);
+                    n.putPOJO("expertise", kw.expertise);
+                    n.putPOJO("sociability", kw.sociability);
+                    neighbors.add(n);
+                }
+                response.putArray("neighbors").addAll(neighbors);
+
+                // print out acquaintances
+                ArrayList<ObjectNode> acquaintances = new ArrayList<>();
+                for (KnownWorker kw: result.acquaintances) {
+                    ObjectNode n = Json.newObject();
+                    n.put("name", kw.name);
+                    n.putPOJO("expertise", kw.expertise);
+                    n.putPOJO("sociability", kw.sociability);
+                    acquaintances.add(n);
+                }
+                response.putArray("acquaintances").addAll(acquaintances);
+
+            } catch (Exception e) {
+                response.put("status", ERROR_STATUS);
+                response.put("message", "Unable to dump states for actor " + name + ".");
+                // e.printStackTrace(System.out);
+            }
+        }
+
+        return createResult(response);
     }
 
     public Result getMessages() {

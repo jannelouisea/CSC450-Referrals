@@ -3,14 +3,17 @@ package controllers;
 import akka.actor.ActorRef;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
 public class WorkerNetwork {
 
     private static WorkerNetwork instance = null;
     private ArrayList<ActorRef> workerNetwork;
+    private HashMap<String, ActorRef> workerMap;
 
     private WorkerNetwork() {
         workerNetwork = new ArrayList<>();
+        workerMap = new HashMap<>();
     }
 
     public static WorkerNetwork getInstance() {
@@ -20,8 +23,9 @@ public class WorkerNetwork {
         return instance;
     }
 
-    public void addWorker(ActorRef w) {
+    public void addWorker(String name, ActorRef w) {
        workerNetwork.add(w);
+       workerMap.put(name, w);
     }
 
     public ArrayList<ActorRef> getNetwork() {
@@ -29,19 +33,7 @@ public class WorkerNetwork {
     }
 
     public ActorRef getWorkerFromName(String name) {
-        for (ActorRef w: workerNetwork) {
-            /*
-            if (w.name.compareTo(name) == 0) {
-                return w;
-            }
-            */
-        }
-        return null;    // TODO: This should be an exception instead
+        return workerMap.get(name);
     }
 
-    public void orderWorkers() {
-        // Collections.sort(workerNetwork, (WorkerActor w1, WorkerActor w2) -> w1.name.compareTo(w2.name));
-        // Can be condensed to
-        // workerNetwork.sort(Comparator.comparing(WorkerActor::getName));
-    }
 }

@@ -15,4 +15,6 @@ public class WorkerActorProtocol {
     public static class SetWorkerNetwork {}
 
     public static class Gen25Queries {}
+
+    public static class DumpStates {}
 }

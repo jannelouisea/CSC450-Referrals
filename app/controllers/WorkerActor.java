@@ -29,6 +29,8 @@ public class WorkerActor extends UntypedAbstractActor {
             setWorkerNetwork();
         else if (msg instanceof Gen25Queries)
             gen25Queries();
+        else if (msg instanceof  DumpStates)
+            dumpStates();
         else
             unhandled(msg);
     }
@@ -74,6 +76,10 @@ public class WorkerActor extends UntypedAbstractActor {
     public void askQuery(double[] query) {
         // determine which neighbor to ask
 
+    }
+
+    public void dumpStates() {
+        sender().tell(new WorkerStates(this.acquaintances, this.neighbors), getSelf());
     }
 
     public void reactionToPrintInfo() {
