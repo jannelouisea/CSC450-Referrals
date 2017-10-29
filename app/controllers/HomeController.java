@@ -70,6 +70,11 @@ public class HomeController extends Controller {
         return ok(views.html.index.render());
     }
 
+    /**
+     *
+     * @param response
+     * @return
+     */
     private Result createResult(ObjectNode response) {
         ObjectMapper mapper = new ObjectMapper();
 
@@ -155,6 +160,12 @@ public class HomeController extends Controller {
     public Result processQueryForWorker(String workerName, String query) {
         return ok("processQuery: " + workerName + " " + query + "\n");
     }
+
+    /**
+     *
+     * @param name
+     * @return
+     */
     public Result getStatesForWorker(String name) {
         ObjectNode response = Json.newObject();
         ActorRef workerRef = workerNetwork.getWorkerFromName(name);
