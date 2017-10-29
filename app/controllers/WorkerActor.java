@@ -1,13 +1,23 @@
 package controllers;
 
+import org.apache.commons.lang3.ArrayUtils;
 import referral_helper.QueryGenerator;
 import java.util.ArrayList;
+import java.util.HashMap;
+
 import akka.actor.*;
 import static akka.pattern.Patterns.ask;
 import controllers.WorkerActorProtocol.*;
 import referral_helper.Utils;
+import scala.concurrent.Future;
+import akka.util.Timeout;
+import scala.concurrent.Await;
+import scala.concurrent.duration.Duration;
 
 public class WorkerActor extends UntypedAbstractActor {
+
+    public final int NO_NEIGHBOR = -1;
+    public final String START = "start";
 
     public String name;
     public double[] needs;
@@ -15,6 +25,7 @@ public class WorkerActor extends UntypedAbstractActor {
     public ArrayList<KnownWorker> neighbors;
     public ArrayList<KnownWorker> acquaintances;
     public WorkerNetwork workerNetwork;
+    private Timeout processQueryTimeout;
 
     public static Props getProps(WorkerBean wb) {
         return Props.create(WorkerActor.class, () -> new WorkerActor(wb));
@@ -30,8 +41,10 @@ public class WorkerActor extends UntypedAbstractActor {
             setWorkerNetwork();
         else if (msg instanceof Gen25Queries)
             gen25Queries();
-        else if (msg instanceof  DumpStates)
+        else if (msg instanceof DumpStates)
             dumpStates();
+        else if (msg instanceof ProcessQuery)
+            processQuery(((ProcessQuery) msg).query);
         else
             unhandled(msg);
     }
@@ -43,6 +56,7 @@ public class WorkerActor extends UntypedAbstractActor {
         this.neighbors = wb.neighbors;
         assert this.neighbors.size() == Utils.getMaxNumOfNeighbors();
         this.acquaintances = wb.acquaintances;
+        processQueryTimeout = new Timeout(Duration.create(30, "seconds"));
         workerNetwork = null;
     }
 
@@ -63,23 +77,91 @@ public class WorkerActor extends UntypedAbstractActor {
         System.out.println("===================================== " + this.name);
         for (int i = 0; i < numOfQueries; i++) {
             double query[] = QueryGenerator.getInstance().genQuery(this.name, this.needs);
-            askQuery(query);
+
+            // Get neighbor's scores
+            int bestNeighborIdx = chooseBestNeighbor(query);
+            int secondBestNeighborIdx = getSecondBestNeighbor(bestNeighborIdx);
+
+            if (bestNeighborIdx == NO_NEIGHBOR) { }
+            else {
+                // ask best neighbor and update referMap
+                KnownWorker bestNeighbor = this.neighbors.get(bestNeighborIdx);
+                ActorRef bestNeighborRef = workerNetwork.getWorkerFromName(bestNeighbor.name);
+                // askInitQuery
+                askQuery(bestNeighborRef, bestNeighbor.name, query);
+            }
+
         }
         sender().tell("DONE", getSelf());
     }
 
-    public void askQuery(double[] query) {
-        // determine which neighbor to ask
-        int bestNeighbor = chooseBestNeighbor(query);
-        int secondBestNeighbor = getSecondBestNeighbor(bestNeighbor);
-        System.out.println("BestNeighbor: " + bestNeighbor);
-        System.out.println("SecondBestNeighbor: " + secondBestNeighbor);
+    public void askInitQuery(double[] query) {
+        HashMap<String, String> referMap = new HashMap<>();
+
+        // check if the actorRef name in the encountered...
+        // if so do not send an ask
+        // else add to encountered and then ask
+    }
+
+    public void askQuery(ActorRef worker, String name, double[] query) {
+        /*
+            Future<Object> processQueryFuture = ask(worker, new ProcessQuery(), processQueryTimeout);
+            // Send a SEND message with drools here
+
+            // Update the referMap
+            if (referMap.isEmpty()) {
+                referMap.put(START, name);
+            } else {
+                referMap.put(this.name, name);
+            }
+
+            try {
+                QueryResponse response = (QueryResponse) Await.result(processQueryFuture, processQueryTimeout.duration());
+                // send a RECEIVE message with drools here
+            } catch (Exception e) {
+                e.printStackTrace(System.out);
+            }
+        }
+        */
+    }
+
+    public void processQuery(ProcessQuery pq) {
+        QueryResponse response = null;
+        // Check self
+        // Will assume that is actor is asked to process query then they are not in the encountered list
+        pq.encountered.add(this.name);
+        if (Utils.isExpertiseMatch(this.expertise, pq.query)) {
+            double[] answer = Utils.genAnswer(this.expertise, pq.query);
+            response = new QueryResponse(QueryResponseType.SUCCESS, answer, this.name);
+        } else {
+            // Choose neighbors
+            int bestNeighborIdx = chooseBestNeighbor(pq.query);
+            KnownWorker bestNeighbor = this.neighbors.get(bestNeighborIdx);
+            int secondBestNeighborIdx = getSecondBestNeighbor(bestNeighborIdx);
+            KnownWorker secondBestNeighbor = this.neighbors.get(secondBestNeighborIdx);
+
+            if (bestNeighborIdx > NO_NEIGHBOR && !pq.encountered.contains(bestNeighbor.name)) {
+                if (Utils.isExpertiseMatch(bestNeighbor.sociability, pq.query) || Utils.isExpertiseMatch(bestNeighbor.expertise, pq.query))
+                    response = new QueryResponse(QueryResponseType.REFER, bestNeighbor.name);
+            } else if (secondBestNeighborIdx > NO_NEIGHBOR && !pq.encountered.contains(secondBestNeighbor.name)) {
+                if (Utils.isExpertiseMatch(secondBestNeighbor.sociability, pq.query) || Utils.isExpertiseMatch(secondBestNeighbor.expertise, pq.query))
+                    response = new QueryResponse(QueryResponseType.REFER, secondBestNeighbor.name);
+            }
+
+            // If no neighbors can respond
+            if (response == null) {
+                response = new QueryResponse(QueryResponseType.REFUSE);
+            }
+        }
+
+        sender().tell(response, getSelf());
+
     }
 
     public int chooseBestNeighbor(double[] query) {
         double w = Utils.getWeightOfSociability();
         double bestScore = -1.0;
-        int bestNeighbor = -1;
+        int bestNeighbor = NO_NEIGHBOR;
 
         int i = 0;
         for(KnownWorker kw: this.neighbors) {
@@ -100,7 +182,7 @@ public class WorkerActor extends UntypedAbstractActor {
         if (this.neighbors.size() == 2)
             return (i == 0) ? 1 : 0;
         else
-            return -1;
+            return NO_NEIGHBOR;
     }
 
     public double innerProduct(double[] a1, double[] a2) {

@@ -1,5 +1,7 @@
 package controllers;
 
+import java.util.ArrayList;
+
 public class WorkerActorProtocol {
 
     public static class AddNeighbor {
@@ -17,4 +19,14 @@ public class WorkerActorProtocol {
     public static class Gen25Queries {}
 
     public static class DumpStates {}
+
+    public static class ProcessQuery {
+        public double[] query;
+        public ArrayList<String> encountered;
+
+        public ProcessQuery(double[] query, ArrayList<String> encountered) {
+            this.query = query;
+            this.encountered = encountered;
+        }
+    }
 }
