@@ -1,5 +1,6 @@
 package controllers;
 
+import akka.actor.ActorRef;
 import play.Environment;
 import org.kie.api.runtime.KieContainer;
 import org.kie.api.KieServices;
@@ -8,20 +9,22 @@ import play.libs.Json;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
-import java.util.Iterator;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import org.drools.compiler.kie.builder.impl.KieServicesImpl;
-import org.kie.api.KieServices;
-import org.kie.api.event.rule.DebugAgendaEventListener;
-import org.kie.api.event.rule.DebugRuleRuntimeEventListener;
-import org.kie.api.runtime.KieContainer;
 import org.kie.api.runtime.KieSession;
-import play.Environment;
-import play.inject.ApplicationLifecycle;
-import play.libs.F;
+
 import javax.inject.Inject;
+import akka.actor.ActorSystem;
+import static akka.pattern.Patterns.ask;
+import controllers.WorkerActorProtocol.*;
+import akka.util.Timeout;
+import scala.concurrent.Await;
+import scala.concurrent.duration.Duration;
+import scala.concurrent.Future;
+import java.util.Comparator;
 
 /**
  * This controller contains an action to handle HTTP requests
@@ -36,7 +39,11 @@ public class HomeController extends Controller {
     public final KieSession kieSession;
 
     private KieContainer kc;
+    private ActorSystem referrals;
     private WorkerNetwork workerNetwork;
+
+    private Timeout printInfoTimeout;
+    private Timeout gen25QueriesTimeout;
 
     @Inject
     public HomeController(Environment environment) {
@@ -45,7 +52,12 @@ public class HomeController extends Controller {
         KieContainer kc = kieServices.getKieClasspathContainer(environment.classLoader());
         kieSession = kc.newKieSession("HelloWorldKS");
 
+        // initiate actor system
+        referrals = ActorSystem.create("referrals");
+
         workerNetwork = WorkerNetwork.getInstance();
+        printInfoTimeout = new Timeout(Duration.create(1, "seconds"));
+        gen25QueriesTimeout = new Timeout(Duration.create(30, "seconds"));
     }
 
     /**
@@ -79,20 +91,17 @@ public class HomeController extends Controller {
             return createResult(response);
         }
 
-        /* TODO Do error checking?
-        if (json.isArray()) {
-            System.out.println("JSON is an array\n");
-        } else {
-            System.out.println("IDK\n");
-        }
-        */
-
         processJsonGraph(json);
-        workerNetwork.orderWorkers();
-        ArrayList<Worker> network = workerNetwork.getNetwork();
-        for(Worker w: network) {
-            w.setWorkerNetwork();
-            // Call the 25 queries?
+        workerNetwork.orderWorkers();       // TODO Fix this!!
+        ArrayList<ActorRef> network = workerNetwork.getNetwork();
+        for(ActorRef w: network) {
+            w.tell(new SetWorkerNetwork(), null);
+            Future<Object> gen25QueriesFuture = ask(w, new Gen25Queries(), gen25QueriesTimeout);
+            try {
+                String result = (String) Await.result(gen25QueriesFuture, gen25QueriesTimeout.duration());
+            } catch (Exception e) {
+                e.printStackTrace(System.out);
+            }
         }
 
         response.put("status", SUCCESS_STATUS);
@@ -100,12 +109,14 @@ public class HomeController extends Controller {
     }
 
     private void processJsonGraph(JsonNode root) {
+        ArrayList<WorkerBean> workers = new ArrayList<>();
+
         for (JsonNode item: root) {
             String name = item.findPath("name").textValue();
             double needs[] = getDoubleArrayFromJsonNode(item, "needs");
             double expertise[] = getDoubleArrayFromJsonNode(item, "expertise");
 
-            Worker w = new Worker(name, needs, expertise);
+            WorkerBean wb = new WorkerBean(name, needs, expertise);
 
             JsonNode neighborsArray = item.findPath("neighbors");
             for (JsonNode neighbor: neighborsArray) {
@@ -113,11 +124,16 @@ public class HomeController extends Controller {
                 double n_sociability[] = getDoubleArrayFromJsonNode(neighbor, "sociability");
                 double n_expertise[] = getDoubleArrayFromJsonNode(neighbor, "expertise");
 
-                w.addNeighbor(new KnownWorker(n_name, n_expertise, n_sociability));
+                wb.addKnownWorker(new KnownWorker(n_name, n_expertise, n_sociability));
             }
+            workers.add(wb);
+        }
 
-            workerNetwork.addWorker(w);
-            w.printInfo();      // TODO: Remove this before submitting
+        workers.sort(Comparator.comparing(WorkerBean::getName));
+
+        for(WorkerBean worker: workers) {
+            ActorRef workerRef = referrals.actorOf(WorkerActor.getProps(worker), worker.name);
+            workerNetwork.addWorker(workerRef);
         }
 
     }
@@ -143,6 +159,7 @@ public class HomeController extends Controller {
     public Result getStatesForWorker(String workerName) {
         return ok("getStates: " + workerName + "\n");
     }
+
     public Result getMessages() {
         return ok("getMessages\n");
     }

@@ -4,6 +4,7 @@ import java.util.Random;
 import java.lang.Math;
 
 public class QueryGenerator {
+	public final int NUM_OF_QUERIES = 25;
 	public static final long defaultSeed = 0;
 	public static QueryGenerator getInstance() {
 		return new QueryGenerator();
